@@ -627,6 +627,74 @@ function Cleanup {
 # *******************************************************
 # **                  GUI FUNCTIONS                    **
 # *******************************************************
+# Function to detect if Windows is in dark mode
+function Get-DarkModePreference {
+	<#
+	.SYNOPSIS
+		Detects if Windows is using dark mode.
+	.DESCRIPTION
+		This function checks the Windows registry to determine whether the operating system is currently using dark mode for applications.
+	.INPUTS
+		None.
+	.OUTPUTS
+		[bool] - Returns $true if dark mode is enabled, otherwise $false.
+	.NOTES
+		The function uses the registry path HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize to fetch the AppsUseLightTheme key.
+	#>
+	
+	try {
+		$RegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+		$AppsUseLightTheme = Get-ItemProperty -Path $RegPath -Name AppsUseLightTheme -ErrorAction Stop
+		return -not [bool]$AppsUseLightTheme.AppsUseLightTheme
+	} catch {
+		# Default to light mode if the registry key is missing or unreadable
+		return $false
+	}
+}
+
+# Function to create styled buttons for consistency
+function Create-StyledButton {
+	<#
+	.SYNOPSIS
+		Creates a styled button for the GUI.
+	.DESCRIPTION
+		This function generates a button with consistent styling, including background color, font, and size. It also defines the action to perform when the button is clicked.
+	.PARAMETER Text
+		The text to display on the button.
+	.PARAMETER X
+		The X-coordinate (horizontal position) of the button.
+	.PARAMETER Y
+		The Y-coordinate (vertical position) of the button.
+	.PARAMETER OnClick
+		A script block that defines the action to perform when the button is clicked.
+	.INPUTS
+		[string] - Text
+		[int] - X, Y
+		[scriptblock] - OnClick
+	.OUTPUTS
+		[System.Windows.Forms.Button] - A configured button object.
+	#>
+
+	param (
+		[string]$Text,  # Button label text
+		[int]$X,  # X-coordinate position of the button
+		[int]$Y,  # Y-coordinate position of the button
+		[scriptblock]$OnClick  # Action to perform on button click
+	)
+
+	$Button = New-Object System.Windows.Forms.Button
+	$Button.Text = $Text  # Assign the button's label
+	$Button.Font = New-Object System.Drawing.Font("Segoe UI", 10)  # Font styling for button text
+	$Button.BackColor = $ButtonColor  # Button background color based on theme
+	$Button.ForeColor = $TextColor  # Button text color based on theme
+	$Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat  # Flat styling for modern appearance
+	$Button.Size = New-Object System.Drawing.Size($ButtonWidth, $ButtonHeight)  # Set button size
+	$Button.Location = New-Object System.Drawing.Point($X, $Y)  # Position the button
+	$Button.Add_Click($OnClick)  # Define the click action for the button
+	return $Button  # Return the configured button
+}
+
+# Function to create the overall GUI
 function Show-GUI {
 	<#
 	.SYNOPSIS
@@ -650,18 +718,6 @@ function Show-GUI {
 	#>
 
     Add-Type -AssemblyName System.Windows.Forms
-
-    # Function to detect if Windows is in dark mode
-    function Get-DarkModePreference {
-        try {
-            $RegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-            $AppsUseLightTheme = Get-ItemProperty -Path $RegPath -Name AppsUseLightTheme -ErrorAction Stop
-            return -not [bool]$AppsUseLightTheme.AppsUseLightTheme
-        } catch {
-            # Default to light mode if the registry key is missing or unreadable
-            return $false
-        }
-    }
 
     # Detect dark mode preference
     $IsDarkMode = Get-DarkModePreference
@@ -727,27 +783,6 @@ function Show-GUI {
     $ButtonWidth = 150  # Set width for all buttons
     $ButtonHeight = 50  # Set height for all buttons
     $Margin = 20  # Space between buttons
-
-    # Function to create styled buttons for consistency
-    function Create-StyledButton {
-        param (
-            [string]$Text,  # Button label text
-            [int]$X,  # X-coordinate position of the button
-            [int]$Y,  # Y-coordinate position of the button
-            [scriptblock]$OnClick  # Action to perform on button click
-        )
-
-        $Button = New-Object System.Windows.Forms.Button
-        $Button.Text = $Text  # Assign the button's label
-        $Button.Font = New-Object System.Drawing.Font("Segoe UI", 10)  # Font styling for button text
-        $Button.BackColor = $ButtonColor  # Button background color based on theme
-        $Button.ForeColor = $TextColor  # Button text color based on theme
-        $Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat  # Flat styling for modern appearance
-        $Button.Size = New-Object System.Drawing.Size($ButtonWidth, $ButtonHeight)  # Set button size
-        $Button.Location = New-Object System.Drawing.Point($X, $Y)  # Position the button
-        $Button.Add_Click($OnClick)  # Define the click action for the button
-        return $Button  # Return the configured button
-    }
 
     # Add buttons with actions
     $Form.Controls.Add((Create-StyledButton -Text "Backup Profiles" -X $Margin -Y ($Margin + 120) -OnClick {
