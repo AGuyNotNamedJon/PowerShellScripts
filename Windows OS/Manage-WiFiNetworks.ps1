@@ -98,6 +98,18 @@ param (
 	[switch]$UseGUI
 )
 
+$ScriptDetails = @{
+    Version      = [version]'1.2.0.0'
+    InternalName = "Manage-WiFiNetworks"
+}
+
+$LoggingSettings = @{
+    LogFileName   = $ScriptDetails.InternalName
+    Console       = $true
+    WriteLogFile  = $true
+    DateTimeIsUTC = $false
+}
+
 # *******************************************************
 # *******************************************************
 # **                                                   **
@@ -116,6 +128,10 @@ $BackupPath = Join-Path -Path $DesktopPath -ChildPath $BackupDirName
 # Path to the script for execution when GUI has been used
 $ScriptPath = $PSScriptRoot
 
+# 
+$LogFileTitle
+$LogFilePath = Join-Path -Path "C:\temp" -ChildPath "WiFiManager.log"
+
 # *******************************************************
 # *******************************************************
 # **                                                   **
@@ -130,19 +146,19 @@ $ScriptPath = $PSScriptRoot
 Function Write-Log {
     param (
         [parameter(Mandatory = $true)]    
-        [String]$Message,
+        [String]$Comment,
 
-        [parameter(Mandatory = $false)]
-        [String]$LogFileName = $false,
+        [parameter(Mandatory = $true)]
+        [String]$LogFileName,
 
-        [parameter(Mandatory = $false)]
-        [bool]$Console = $true,
+        [parameter(Mandatory = $true)]
+        [bool]$Console,
 
-        [parameter(Mandatory = $false)]
-        [bool]$WriteLogFile = $false,
+        [parameter(Mandatory = $true)]
+        [bool]$WriteLogFile,
 
-        [parameter(Mandatory = $false)]
-        [bool]$DateTimeIsUTC = $false,
+        [parameter(Mandatory = $true)]
+        [bool]$DateTimeIsUTC,
 
         [parameter(Mandatory = $false)]
         [ValidateSet("Continue", "Ignore", "Inquire", "SilentlyContinue", "Stop", "Suspend")]
@@ -195,7 +211,7 @@ Function Write-Log {
         }
     }
 
-    $LogOutput = $TimeStamp + " -- " + $LogLevel + " -- " + $Message
+    $LogOutput = $TimeStamp + " -- " + $LogLevel + " -- " + $Comment
 
     if ($WriteLogFile) {
         Add-Content -Value $LogOutput -LiteralPath $LogFileName
@@ -236,38 +252,60 @@ Function Write-Log {
 # Ensure elevated privileges
 try {
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Log -Message "This script must be run as an administrator." -Level ERROR
+        Write-Log -Comment "This script must be run as an administrator." -Level ERROR
         exit
     }
 } catch {
-    Write-Log -Message "Error checking for administrator privileges: $_" -Level ERROR
+    Write-Log -Comment "Error checking for administrator privileges: $_" -Level ERROR
     exit
 }
 
 # Check for netsh availability
 try {
     if (-not (Get-Command "netsh" -ErrorAction SilentlyContinue)) {
-        Write-Log -Message "The 'netsh' command is not available on this system. Aborting." -Level ERROR
+        Write-Log -Comment "The 'netsh' command is not available on this system. Aborting." -Level ERROR
         exit
     }
 } catch {
-    Write-Log -Message "Error checking for netsh command: $_" -Level ERROR
+    Write-Log -Comment "Error checking for netsh command: $_" -Level ERROR
     exit
 }
-
 
 # Ensure incompatible parameters are not used together
-if ($Backup -and $Wipe) {
-    Write-Log -Message "Parameters -Backup and -Wipe cannot be used together." -Level ERROR
-    exit
+# Define parameter conflicts with descriptions
+$conflictingGroups = @(
+    @{ Params = @($Restore, $Wipe); Message = "Restore and Wipe operations cannot be used together. These are distinct actions that modify Wi-Fi profiles." },
+    @{ Params = @($Backup, $Wipe); Message = "Backup and Wipe operations cannot be used together. These are distinct actions that modify Wi-Fi profiles." },
+    @{ Params = @($Backup, $Restore); Message = "Backup and Restore operations cannot be used together. These are distinct actions that modify Wi-Fi profiles." },
+    @{ Params = @($Backup, $Cleanup); Message = "Backup and Cleanup cannot be used together. Cleanup deletes the backup folder required for the backup process." },
+    @{ Params = @($Restore, $Cleanup); Message = "Restore and Cleanup cannot be used together. Cleanup deletes the backup folder required for restoring profiles." },
+    @{ Params = @($CompressBackup, $Cleanup); Message = "CompressBackup and Cleanup cannot be used together. Cleanup deletes the backup folder required for compression." },
+    @{ Params = @($ExportToText, $Wipe); Message = "ExportToText and Wipe operations cannot be used together. Wipe deletes profiles, making export meaningless." },
+    @{ Params = @($CompressBackup, $Wipe); Message = "CompressBackup and Wipe operations cannot be used together. Wipe removes all profiles, leaving nothing to compress." },
+    @{ Params = @($ListCurrent, $Wipe); Message = "ListCurrent and Wipe cannot be used together. Wipe removes profiles, making listing meaningless." },
+    @{ Params = @($ListBackup, $Cleanup); Message = "ListBackup and Cleanup cannot be used together. Cleanup deletes the backup folder required for listing backed-up profiles." },
+)
+
+# Loop to check for parameter conflicts in the command run
+foreach ($group in $conflictingGroups) {
+    $activeParams = $group.Params | Where-Object { $_ -eq $true }
+    if ($activeParams.Count -gt 1) {
+        $conflictingNames = $group.Params | ForEach-Object { ($_ | Get-Variable).Name } | Where-Object { $activeParams -contains $($_ | Get-Variable).Value }
+        Write-Log -Comment "Conflicting parameters detected: $($conflictingNames -join ', ')." -Level ERROR
+        Write-Log -Comment "${group.Message}" -Level ERROR
+        Write-Log -Message "Try running the script with a single parameter from this group." -Level INFO
+        exit
+    }
 }
 
-# Checks for and creates the backup folder location if it doesn't exist
-if ($UseGUI -or $Backup) {
-    if (-not (Test-Path -Path $BackupPath)) {
-        Write-Log -Message "Backup folder not found. Creating backup folder at $BackupPath..." -Level INFO
-        New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
-    }
+# Validate NetworkName input
+if ($NetworkName) {
+    if ($NetworkName -notmatch '^[a-zA-Z0-9 _-!@#]{1,32}$') {
+		Write-Log -Message "Invalid network name: '$NetworkName'." -Level ERROR
+		Write-Log -Message "Allowed characters: alphanumerics, spaces, underscores, hyphens, and special characters (!, @, #)." -Level ERROR
+		Write-Log -Message "Must be between 1 and 32 characters long." -Level ERROR
+		exit
+	}
 }
 
 # *******************************************************
@@ -347,10 +385,10 @@ function Read-InYesNo {
 # GUI confirmation function
 function Confirm-Action {
     param (
-        [string]$Message
+        [string]$Comment
     )
 
-    $Result = [System.Windows.Forms.MessageBox]::Show($Message, "Confirmation", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+    $Result = [System.Windows.Forms.MessageBox]::Show($Comment, "Confirmation", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
     return $Result -eq [System.Windows.Forms.DialogResult]::Yes
 }
 
@@ -371,6 +409,16 @@ function Add-GUIButton {
     return $Button
 }
 
+function Create-BackupFolder {
+	# Checks for and creates the backup folder location if it doesn't exist
+	if ($UseGUI -or $Backup) {
+		if (-not (Test-Path -Path $BackupPath)) {
+			Write-Log -Comment "Backup folder not found. Creating backup folder at $BackupPath..." -Level INFO
+			New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
+		}
+	}
+}
+
 # *******************************************************
 # **                  CORE FUNCTIONS                   **
 # *******************************************************
@@ -384,16 +432,16 @@ function ListSavedNetworks {
         Uses the `netsh wlan show profiles` command to retrieve and display all saved Wi-Fi network profiles.
     #>
 
-    Write-Log -Message "Listing all saved Wi-Fi networks currently added to Windows..." -Level INFO
+    Write-Log -Comment "Listing all saved Wi-Fi networks currently added to Windows..." -Level INFO
     $Networks = netsh wlan show profiles | ForEach-Object {
         if ($_ -match "All User Profile\s*:\s*(.+)$") {
             $matches[1]
         }
     }
     if ($Networks) {
-        $Networks | ForEach-Object { Write-Log -Message $_ -Level INFO }
+        $Networks | ForEach-Object { Write-Log -Comment $_ -Level INFO }
     } else {
-        Write-Log -Message "No saved Wi-Fi networks found." -Level WARNING
+        Write-Log -Comment "No saved Wi-Fi networks found." -Level WARNING
     }
 }
 
@@ -405,11 +453,11 @@ function ListBackedUpNetworks {
     .DESCRIPTION
         Scans the backup folder to list all profiles that were previously exported.
     #>
-    Write-Log -Message "Listing all Wi-Fi networks that have been backed up..." -Level INFO
+    Write-Log -Comment "Listing all Wi-Fi networks that have been backed up..." -Level INFO
     if (Test-Path $BackupPath) {
         Get-ChildItem $BackupPath -Filter *.xml | ForEach-Object { $_.BaseName }
     } else {
-        Write-Log -Message "No backup folder found. Please perform a backup first." -Level WARNING
+        Write-Log -Comment "No backup folder found. Please perform a backup first." -Level WARNING
     }
 }
 
@@ -424,27 +472,31 @@ function Backup {
     #>
     
 	# Check and create the backup folder if it doesn't exist
-    if (-not (Test-Path -Path $BackupPath)) {
-        Write-Log -Message "Backup folder not found. Creating backup folder at $BackupPath..." -Level INFO
-        New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
-    }
-	
-	Write-Log -Message "Backing up saved Wi-Fi networks..." -Level INFO
-    New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
+    Create-BackupFolder
 
-    if ($NetworkName) {
-        Write-Log -Message "Backing up Wi-Fi network: $NetworkName..." -Level INFO
-        $result = netsh wlan export profile name="$NetworkName" key=clear folder="$BackupPath"
-        if ($result -match "successfully exported") {
-            Write-Log -Message "Backup completed successfully for network: $NetworkName" -Level INFO
+    Write-Log -Comment "Backing up saved Wi-Fi networks..." -Level INFO
+    try {
+        if ($NetworkName) {
+            Write-Log -Comment "Backing up Wi-Fi network: $NetworkName..." -Level INFO
+            $result = netsh wlan export profile name="$NetworkName" key=clear folder="$BackupPath" 2>&1
+            if ($result -notmatch "successfully exported") {
+                Write-Log -Comment "Failed to back up network: $NetworkName. Ensure the network name is correct." -Level ERROR
+                return
+            }
+            Write-Log -Comment "Backup completed successfully for network: $NetworkName" -Level INFO
         } else {
-            Write-Log -Message "Failed to backup network: $NetworkName. Ensure the network name is correct." -Level ERROR
+            $result = netsh wlan export profile key=clear folder="$BackupPath" 2>&1
+            if ($result -notmatch "successfully exported") {
+                Write-Log -Comment "Failed to back up one or more networks. Check permissions and network availability." -Level ERROR
+                return
+            }
+            Write-Log -Comment "Backup complete for all network profiles." -Level INFO
         }
-	} else {
-        netsh wlan export profile key=clear folder="$BackupPath"
-        Write-Log -Message "Backup complete for all network profiles." -Level INFO
+    } catch {
+        Write-Log -Comment "Error during backup operation: $_" -Level ERROR
     }
 }
+
 
 # Function: Restore (with confirmation)
 function Restore {
@@ -456,34 +508,39 @@ function Restore {
     #>
 	
 	# Checks if the backup folder exists, if it doesn't it reports that the backup folder doesn't exist and exits as there is no work to do
-	if (-not (Test-Path -Path $BackupPath)) {
-    Write-Log -Message "Backup folder not found. Cannot restore profiles. Please ensure backups are available." -Level ERROR
-    return
-	}
-
-    Write-Log -Message "WARNING: Restoring Wi-Fi profiles will overwrite existing profiles. Ensure the backup is trusted." -Level WARNING
-    $Confirm = if ($UseGUI) { Confirm-Action "Are you sure you want to restore Wi-Fi networks from the backup?" } else { Read-InYesNo -Prompt "Are you sure you want to restore Wi-Fi networks from the backup?" }
-    if (-not $Confirm) {
-        Write-Log -Message "Restore operation cancelled by user." -Level WARNING
+    if (-not (Test-Path -Path $BackupPath)) {
+        Write-Log -Comment "Backup folder not found. Cannot restore profiles. Please ensure backups are available." -Level ERROR
         return
     }
 
-    Write-Log -Message "Restoring Wi-Fi networks..." -Level INFO
-    if ($NetworkName) {
-        Write-Log -Message "Restoring Wi-Fi network: $NetworkName..." -Level INFO
-        $File = Get-ChildItem -Path $BackupPath -Filter "$NetworkName.xml" | Select-Object -First 1
-        if ($File) {
-            netsh wlan add profile filename="$($File.FullName)" user=current
-            Write-Log -Message "Restored network: $NetworkName" -Level INFO
+    Write-Log -Comment "Restoring Wi-Fi networks..." -Level INFO
+    try {
+        if ($NetworkName) {
+            Write-Log -Comment "Restoring Wi-Fi network: $NetworkName..." -Level INFO
+            $File = Get-ChildItem -Path $BackupPath -Filter "$NetworkName.xml" | Select-Object -First 1
+            if ($File) {
+                $result = netsh wlan add profile filename="$($File.FullName)" user=current 2>&1
+                if ($result -notmatch "added to the system successfully") {
+                    Write-Log -Comment "Failed to restore network: $NetworkName. Ensure the backup exists and is valid." -Level ERROR
+                    return
+                }
+                Write-Log -Comment "Restored network: $NetworkName" -Level INFO
+            } else {
+                Write-Log -Comment "No backup found for network: $NetworkName" -Level ERROR
+            }
         } else {
-            Write-Log -Message "No backup found for network: $NetworkName" -Level ERROR
+            $Files = Get-ChildItem -Path $BackupPath -Filter "*.xml"
+            foreach ($File in $Files) {
+                $result = netsh wlan add profile filename="$($File.FullName)" user=current 2>&1
+                if ($result -notmatch "added to the system successfully") {
+                    Write-Log -Comment "Failed to restore profile from file: $($File.FullName)" -Level ERROR
+                } else {
+                    Write-Log -Comment "Restored profile from file: $($File.FullName)" -Level INFO
+                }
+            }
         }
-    } else {
-		$Files = Get-ChildItem -Path $BackupPath -Filter "*.xml"
-        foreach ($File in $Files) {
-            netsh wlan add profile filename="$($File.FullName)" user=current
-        }
-        Write-Log -Message "Restored all Wi-Fi network profiles from backup." -Level INFO
+    } catch {
+        Write-Log -Comment "Error during restore operation: $_" -Level ERROR
     }
 }
 
@@ -496,17 +553,29 @@ function Wipe {
         Removes all Wi-Fi profiles using the `netsh wlan delete profile` command.
     #>
 
-    Write-Log -Message "WARNING: This will delete ALL saved Wi-Fi network profiles on this system. This action is irreversible and cannot be undone unless you have a backup." -Level WARNING
+    Write-Log -Comment "WARNING: This will delete ALL saved Wi-Fi network profiles on this system. This action is irreversible and cannot be undone unless you have a backup." -Level WARNING
 
+    # Confirm the action
     $Confirm = if ($UseGUI) { Confirm-Action "Are you sure you want to delete ALL saved Wi-Fi networks?" } else { Read-InYesNo -Prompt "Are you sure you want to delete ALL saved Wi-Fi networks?" }
     if (-not $Confirm) {
-        Write-Log -Message "Wipe operation cancelled by user." -Level WARNING
+        Write-Log -Comment "Wipe operation cancelled by user." -Level WARNING
         return
     }
 
-    Write-Log -Message "Deleting all saved Wi-Fi network profiles..." -Level INFO
-    netsh wlan delete profile name="*" i="*"
-    Write-Log -Message "Done: All saved Wi-Fi networks have been deleted." -Level INFO
+    Write-Log -Comment "Deleting all saved Wi-Fi network profiles..." -Level INFO
+
+    try {
+        $result = netsh wlan delete profile name="*" 2>&1
+        if ($result -match "Profile.*on interface.*successfully deleted") {
+            Write-Log -Comment "Successfully deleted all saved Wi-Fi profiles." -Level INFO
+        } elseif ($result -match "No profiles.*") {
+            Write-Log -Comment "No Wi-Fi profiles were found to delete." -Level WARNING
+        } else {
+            Write-Log -Comment "Failed to delete Wi-Fi profiles. Error: $result" -Level ERROR
+        }
+    } catch {
+        Write-Log -Comment "Error during Wipe operation: $_" -Level ERROR
+    }
 }
 
 # Function: ExportToPlainText  (with confirmation)
@@ -518,17 +587,20 @@ function ExportToPlainText {
         Extracts Wi-Fi profile names and passwords and writes them to a text file in the backup folder.
     #>
 
-    Write-Log -Message "WARNING: This will export Wi-Fi network names and passwords to a plain text file. Ensure this file is kept secure." -Level WARNING
+    Write-Log -Comment "WARNING: This will export Wi-Fi network names and passwords to a plain text file. Ensure this file is kept secure." -Level WARNING
 
+    # Confirm the action
     $Confirm = if ($UseGUI) { Confirm-Action "Are you sure you want to export Wi-Fi networks and passwords to a text file?" } else { Read-InYesNo -Prompt "Are you sure you want to export Wi-Fi networks and passwords to a text file?" }
     if (-not $Confirm) {
-        Write-Log -Message "Export operation cancelled by user." -Level WARNING
+        Write-Log -Comment "Export operation cancelled by user." -Level WARNING
         return
     }
+	
+	# Check and create the backup folder if it doesn't exist
+    Create-BackupFolder
 
     $ExportPath = Join-Path -Path $DesktopPath -ChildPath "WiFi_Networks_Passwords.txt"
-
-    Write-Log -Message "Exporting Wi-Fi profiles and passwords to $ExportPath..." -Level INFO
+    Write-Log -Comment "Exporting Wi-Fi profiles and passwords to $ExportPath..." -Level INFO
 
     try {
         $Profiles = netsh wlan show profiles | ForEach-Object {
@@ -541,24 +613,30 @@ function ExportToPlainText {
             $Output = "Wi-Fi Network Profiles and Passwords:`n`n"
 
             foreach ($Profile in $Profiles) {
-                $Details = netsh wlan show profile name="$Profile" key=clear
-
-                if ($Details -match "Key Content\s*:\s*(.+)$") {
-                    $Password = $matches[1]
-                } else {
-                    $Password = "(No password saved)"
+                try {
+                    $Details = netsh wlan show profile name="$Profile" key=clear 2>&1
+                    if ($Details -match "Key Content\s*:\s*(.+)$") {
+                        $Password = $matches[1]
+                    } else {
+                        $Password = "(No password saved)"
+                    }
+					# Writes to log the profile being recorded while not recording the password to the log
+					Write-Log -Message "Network Name: $Profile, Password: <hidden>" -Level INFO
+					
+                    $Output += "Network Name: $Profile`nPassword: $Password`n`n"
+                } catch {
+                    Write-Log -Comment "Error retrieving details for profile: $Profile. Skipping." -Level WARNING
+                    continue
                 }
-
-                $Output += "Network Name: $Profile`nPassword: $Password`n`n"
             }
 
             $Output | Set-Content -Path $ExportPath
-            Write-Log -Message "Export complete: $ExportPath." -Level INFO
+            Write-Log -Comment "Export complete: $ExportPath." -Level INFO
         } else {
-            Write-Log -Message "No Wi-Fi profiles found to export." -Level INFO
+            Write-Log -Comment "No Wi-Fi profiles found to export." -Level INFO
         }
     } catch {
-        Write-Log -Message "Error exporting Wi-Fi profiles: $_" -Level ERROR
+        Write-Log -Comment "Error during Export operation: $_" -Level ERROR
     }
 }
 
@@ -571,11 +649,11 @@ function CompressBackup {
         Uses the `Compress-Archive` cmdlet to compress the backup folder into a .zip archive for easier storage or sharing.
     #>
 
-    Write-Log -Message "Compressing backup folder..." -Level INFO
+    Write-Log -Comment "Compressing backup folder..." -Level INFO
 
     try {
         if (-not (Test-Path $BackupPath)) {
-            Write-Log -Message "Backup path does not exist. Perform a backup first." -Level ERROR
+            Write-Log -Comment "Backup path does not exist. Perform a backup first." -Level ERROR
             return
         }
 
@@ -583,15 +661,24 @@ function CompressBackup {
         $ZIPFileName = "$BackupDirName-$Timestamp.zip"
         $ZipFilePath = Join-Path -Path $DesktopPath -ChildPath $ZIPFileName
 
+		if (Test-Path $ZipFilePath) {
+			Write-Log -Message "A ZIP file with the same name already exists: $ZipFilePath." -Level WARNING
+			$ConfirmOverwrite = if ($UseGUI) { Confirm-Action "Overwrite existing ZIP file?" } else { Read-InYesNo -Prompt "Overwrite existing ZIP file?" }
+			if (-not $ConfirmOverwrite) {
+				Write-Log -Message "Compression operation cancelled by user." -Level WARNING
+				return
+			}
+		}
+
         Compress-Archive -Path $BackupPath -DestinationPath $ZipFilePath -Force
 
         if (-not (Test-Path $ZipFilePath)) {
-            Write-Log -Message "Error: ZIP file was not created successfully." -Level ERROR
+            Write-Log -Comment "Error: ZIP file was not created successfully." -Level ERROR
         } else {
-            Write-Log -Message "Backup folder compressed: $ZipFilePath" -Level INFO
+            Write-Log -Comment "Backup folder compressed: $ZipFilePath" -Level INFO
         }
     } catch {
-        Write-Log -Message "Error compressing backup folder: $_" -Level ERROR
+        Write-Log -Comment "Error compressing backup folder: $_" -Level ERROR
     }
 }
 
@@ -606,22 +693,22 @@ function Cleanup {
 	
 	# Checks if the backup folder exists, if it doesn't it reports that the backup folder doesn't exist and exits as there is no work to do
 	if (-not (Test-Path -Path $BackupPath)) {
-    Write-Log -Message "Backup folder not found. Nothing to clean up." -Level INFO
+    Write-Log -Comment "Backup folder not found. Nothing to clean up." -Level INFO
     return
 	}
 
-    Write-Log -Message "WARNING: This will delete the backup folder and all saved Wi-Fi profile backups." -Level WARNING
-    Write-Log -Message "WARNING: This action is irreversible. Ensure you no longer need these files before proceeding." -Level WARNING
+    Write-Log -Comment "WARNING: This will delete the backup folder and all saved Wi-Fi profile backups." -Level WARNING
+    Write-Log -Comment "WARNING: This action is irreversible. Ensure you no longer need these files before proceeding." -Level WARNING
 
     $Confirm = if ($UseGUI) { Confirm-Action "Delete backup folder?" } else { Read-InYesNo -Prompt "Delete backup folder?" }
     if (-not $Confirm) {
-        Write-Log -Message "Cleanup operation cancelled by user." -Level WARNING
+        Write-Log -Comment "Cleanup operation cancelled by user." -Level WARNING
         return
     }
 
-    Write-Log -Message "Deleting backup folder..." -Level INFO
+    Write-Log -Comment "Deleting backup folder..." -Level INFO
     Remove-Item -Recurse -Force $BackupPath
-    Write-Log -Message "Done: Backup folder has been deleted." -Level INFO
+    Write-Log -Comment "Done: Backup folder has been deleted." -Level INFO
 }
 
 # *******************************************************
@@ -717,8 +804,15 @@ function Show-GUI {
 		None. Logs and actions are displayed in the GUI.
 	#>
 
+	# Ensure GUI components (Windows Forms) are available. If not, provide a clear error message and fallback to CLI mode.
+	if (-not (Get-Command -Name Add-Type -ErrorAction SilentlyContinue)) {
+		Write-Log -Comment "Windows Forms components are not available. Falling back to CLI mode." -Level WARNING
+		$UseGUI = $false		
+		return
+	}
+	# Run the Add-Type command
     Add-Type -AssemblyName System.Windows.Forms
-
+	
     # Detect dark mode preference
     $IsDarkMode = Get-DarkModePreference
 
@@ -872,4 +966,4 @@ if ($UseGUI) {
 	}
 }
 
-Write-Log -Message "Script execution complete." -Level INFO
+Write-Log -Comment "Script execution complete." -Level INFO
