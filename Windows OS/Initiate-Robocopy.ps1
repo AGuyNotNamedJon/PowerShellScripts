@@ -134,8 +134,8 @@ $ScriptLogFile = Join-Path -Path $LogPath -ChildPath "ScriptLog_$(Get-Date -Form
 
 # Parameter block for Robocopy settings
 $RobocopyParams = @{
-	Source = '"$($Source)"' # Source folder
-	Destination = '"$($Destination)"' # Destination folder
+	Source = $("$Source") # Source folder
+	Destination = $("$Destination") # Destination folder
     Recursive = "/E" # Copies all subdirectories, including empty ones, to ensure a complete backup.
     CopyAll = "/COPYALL" # Copies all file attributes, including security permissions.
     RetryCount = "/R:3" # Retries up to 3 times on failing files to minimize network impact.
