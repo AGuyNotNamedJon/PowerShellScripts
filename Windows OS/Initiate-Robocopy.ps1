@@ -501,9 +501,13 @@ try {
     Write-Log @LoggingSettings -Comment "Executing Robocopy..." -Level Info
 	robocopy @RobocopyParams
 	
-	$RobocopySuccess = $True
+    # Log successful completion status
+	Write-Log @LoggingSettings -Comment "Robocopy completed successfully on $(Get-Date)." -Level Info
+    Write-Log @LoggingSettings -Comment "Robocopy log file: $RobocopyLogFile" -Level Info
 } catch {
-    Write-Log @LoggingSettings -Comment "Robocopy encountered an error on $(Get-Date): $_" -Level Error
+    # Log failed completion status
+    Write-Log @LoggingSettings -Comment "Robocopy encountered an error on $(Get-Date)." -Level Error
+    Write-Log @LoggingSettings -Comment "Check the Robocopy log file for details: $RobocopyLogFile" -Level Error
     exit
 }
 
@@ -515,16 +519,6 @@ try {
 	$Summary | ForEach-Object { Write-Log @LoggingSettings -Comment $_ -Level Info }
 } catch {
     Write-Log @LoggingSettings -Comment "An unknown error occured when parsing the log for summary details: $_" -Level Error
-    exit
-}
-
-# Log completion status to the script log
-if ($RobocopySuccess) {
-    Write-Log @LoggingSettings -Comment "Robocopy completed successfully on $(Get-Date)." -Level Info
-    Write-Log @LoggingSettings -Comment "Robocopy log file: $RobocopyLogFile" -Level Info
-} else {
-    Write-Log @LoggingSettings -Comment "Robocopy encountered an error on $(Get-Date)." -Level Error
-    Write-Log @LoggingSettings -Comment "Check the Robocopy log file for details: $RobocopyLogFile" -Level Error
 }
 
 Write-Log @LoggingSettings -Comment "Backup completed. Check the logs for details:" -Level Info
