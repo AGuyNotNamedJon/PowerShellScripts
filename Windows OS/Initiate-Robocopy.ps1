@@ -1,65 +1,69 @@
 <#
 .SYNOPSIS
-A PowerShell script to copy files from a shared network folder to a local drive using Robocopy.
+    A PowerShell script to copy files from a shared network folder to a local drive using Robocopy.
 
 .DESCRIPTION
-This script is designed to:
-1. Copy files from a network share to a local drive.
-2. Preserve all file attributes and permissions.
-3. Avoid modifications to the source files.
-4. Generate two separate logs: one for Robocopy operations and another for script execution details.
-5. Minimize network impact by optimizing Robocopy parameters.
-6. Clean up old log files to save disk space.
-7. Optionally schedule itself in Task Scheduler for periodic execution.
+    This script is designed to:
+    1. Copy files from a network share to a local drive.
+    2. Preserve all file attributes and permissions.
+    3. Avoid modifications to the source files.
+    4. Generate two separate logs: one for Robocopy operations and another for script execution details.
+    5. Minimize network impact by optimizing Robocopy parameters.
+    6. Clean up old log files to save disk space.
+    7. Optionally schedule itself in Task Scheduler for periodic execution.
 
 .PARAMETER Source
-The full path of the source network folder.
+    The full path of the source network folder.
 
 .PARAMETER Destination
-The full path of the local destination folder.
+    The full path of the local destination folder.
 
 .PARAMETER LogPath
-(Optional) The directory where log files will be saved. Defaults to the user's Documents\RobocopyLogs folder.
+    (Optional) The directory where log files will be saved. Defaults to the user's Documents\RobocopyLogs folder.
 
 .PARAMETER Schedule
-(Optional) Adds the script to Task Scheduler with a specified frequency (Daily, Weekly, Monthly, or custom intervals such as every 1, 2, 4, 6, 8, or 12 hours).
+    (Optional) Adds the script to Task Scheduler with a specified frequency (Daily, Weekly, Monthly, or custom intervals such as every 1, 2, 4, 6, 8, or 12 hours).
 
 .PARAMETER Interval
-(Optional) Specifies the interval in hours for custom schedules (e.g., every 1, 2, 4, 6, 8, or 12 hours). Used only when Schedule is set to "Custom".
+    (Optional) Specifies the interval in hours for custom schedules (e.g., every 1, 2, 4, 6, 8, or 12 hours). Used only when Schedule is set to "Custom".
 
 .PARAMETER Times
-(Optional) Specifies one or more times for the script to run, in HH:mm format. Applies to Daily, Weekly, and Monthly schedules.
+    (Optional) Specifies one or more times for the script to run, in HH:mm format. Applies to Daily, Weekly, and Monthly schedules.
 
 .PARAMETER Days
-(Optional) Specifies one or more days of the week for Weekly schedules (e.g., Monday, Wednesday).
+    (Optional) Specifies one or more days of the week for Weekly schedules (e.g., Monday, Wednesday).
 
 .PARAMETER Weeks
-(Optional) Specifies one or more weeks of the month for Monthly schedules (e.g., First, Second, Third).
+    (Optional) Specifies one or more weeks of the month for Monthly schedules (e.g., First, Second, Third).
 
 .PARAMETER MTThreads
-(Optional) Specifies the number of threads to use for Robocopy multithreading (default is 4).
+    (Optional) Specifies the number of threads to use for Robocopy multithreading (default is 4).
 
 .PARAMETER LogRetentionDays
-(Optional) Specifies the number of days to retain log files. Defaults to 7.
+    (Optional) Specifies the number of days to retain log files. Defaults to 7.
 
 .PARAMETER DryRun
-(Optional) If set, performs a dry run without making actual changes or copying files.
+    (Optional) If set, performs a dry run without making actual changes or copying files.
 
-.EXAMPLES
-# Example 1: Basic usage with source and destination
-.\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder"
+.EXAMPLE
+    PS> .\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder"
+    Basic usage with source and destination
 
-# Example 2: Schedule the script to run daily at 9:00 AM and 3:00 PM
-.\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder" -Schedule Daily -Times "09:00","15:00"
+.EXAMPLE
+    PS> .\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder" -Schedule Daily -Times "09:00","15:00"
+    Schedule the script to run daily at 9:00 AM and 3:00 PM
 
-# Example 3: Schedule the script to run weekly on Mondays and Wednesdays at 10:00 AM
-.\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder" -Schedule Weekly -Days Monday,Wednesday -Times "10:00"
+.EXAMPLE
+    PS> .\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder" -Schedule Weekly -Days Monday,Wednesday -Times "10:00"
+    Schedule the script to run weekly on Mondays and Wednesdays at 10:00 AM
 
-# Example 4: Schedule the script to run monthly on the first and third weeks at 11:00 AM
-.\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder" -Schedule Monthly -Weeks First,Third -Times "11:00"
+.EXAMPLE
+    PS> .\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder" -Schedule Monthly -Weeks First,Third -Times "11:00"
+    Schedule the script to run monthly on the first and third weeks at 11:00 AM
 
-# Example 5: Perform a dry run to test the script
-.\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder" -DryRun
+.EXAMPLE
+    PS> .\CopyFiles.ps1 -Source "\\Server\SharedFolder" -Destination "D:\BackupFolder" -DryRun
+    Perform a dry run to test the script
 #>
 
 param (
@@ -161,33 +165,106 @@ $RobocopyParams = @{
 # *******************************************************
 # *******************************************************
 
+# Ensure the log directory exists
+if (-not (Test-Path -Path $LogPath)) {
+    # Create the log directory if it does not exist.
+    New-Item -ItemType Directory -Path $LogPath -Force | Out-Null
+}
+
 # Centralized logging
 Function Write-Log {
+    <#
+    .SYNOPSIS
+    Logs messages to a console, log file, or GUI with customizable options.
+
+    .DESCRIPTION
+    The Write-Log function enables users to log messages with various levels of importance (Debug, Error, Info, Warning, Verbose). 
+    It supports writing to console output, a log file, and a GUI text box if available. Additionally, the function allows users to specify 
+    whether the timestamp should be in UTC and customize error handling behavior.
+
+    .INPUTS
+    None. This function does not take input from the pipeline.
+
+    .OUTPUTS
+    None. This function does not produce output to the pipeline.
+
+    .PARAMETER Comment
+    The message to log.
+
+    .PARAMETER LogFileName
+    The path of the log file where the message should be written.
+
+    .PARAMETER Console
+    Indicates whether the message should be displayed on the console.
+
+    .PARAMETER WriteLogFile
+    Indicates whether the message should be written to the log file.
+
+    .PARAMETER DateTimeIsUTC
+    Specifies if the timestamp should be in UTC format.
+
+    .PARAMETER ErrorAct
+    Defines the error action preference for logging operations. Valid values are: Continue, Ignore, Inquire, SilentlyContinue, Stop, Suspend.
+
+    .PARAMETER Level
+    The severity level of the log message. Valid values are: Debug, Error, Info, Warning, Verbose.
+
+    .PARAMETER UseGUI
+    Indicates whether the message should be displayed in a GUI text box.
+
+    .EXAMPLES
+    Example 1:
+    Write-Log -Comment "This is a test message" -LogFileName "C:\Logs\AppLog.txt" -Console $true -WriteLogFile $true -DateTimeIsUTC $false -Level "Info" -UseGUI $false
+
+    Logs an informational message to both the console and a log file with a local timestamp.
+
+    Example 2:
+    Write-Log -Comment "An error occurred" -LogFileName "C:\Logs\ErrorLog.txt" -Console $true -WriteLogFile $true -DateTimeIsUTC $true -Level "Error" -UseGUI $true
+
+    Logs an error message with a UTC timestamp to the console, log file, and GUI text box.
+
+    .NOTES
+    Ensure the $Script:GUITextBox variable is initialized if UseGUI is enabled. 
+    The function supports only the defined log levels and error actions.
+    #>
+
     param (
+        # The message to log.
         [parameter(Mandatory = $true)]    
         [String]$Comment,
 
+        # The path of the log file where the message should be written.
         [parameter(Mandatory = $true)]
         [String]$LogFileName,
 
+        # Indicates whether the message should be displayed on the console.
         [parameter(Mandatory = $true)]
         [bool]$Console,
 
+        # Indicates whether the message should be written to the log file.
         [parameter(Mandatory = $true)]
         [bool]$WriteLogFile,
 
+        # Specifies if the timestamp should be in UTC format.
         [parameter(Mandatory = $true)]
         [bool]$DateTimeIsUTC,
 
+        # Defines the error action preference for logging operations.
         [parameter(Mandatory = $false)]
         [ValidateSet("Continue", "Ignore", "Inquire", "SilentlyContinue", "Stop", "Suspend")]
         [String]$ErrorAct = "Continue",
 
+        # The severity level of the log message.
         [parameter(Mandatory = $true)]
         [ValidateSet("Debug", "Error", "Info", "Warning", "Verbose")]
-        [String]$Level
+        [String]$Level,
+
+        # Indicates whether the message should be displayed in a GUI text box.
+        [parameter(Mandatory = $false)]
+        [bool]$UseGUI
     )
 
+    # Determine the timestamp format based on the UTC parameter.
     If ($DateTimeIsUTC) {
         $TimeStamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff UTC"
     }
@@ -195,34 +272,41 @@ Function Write-Log {
         $TimeStamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff UTCK"
     }
 
+    # Initialize default text colors for console output.
     $TextColour = @{
         Foregound  = "Gray"
         Background = "Black"
     }
 
+    # Set log level prefix and color based on the severity level.
     Switch ($Level) {
+        # Debug messages are highlighted in yellow.
         "Debug" {
             $LogLevel = "[DBG]"
             $TextColour.Foregound = "DarkYellow"
             break
         }
+        # Errors are highlighted with a red background.
         "Error" {
             $LogLevel = "[ERR]"
             $TextColour.Foregound = "White"
             $TextColour.Background = "Red"
             break
         }
+        # Informational messages are gray.
         "Info" {
             $LogLevel = "[INF]"
             $TextColour.Foregound = "DarkGray"
             break
         }
+        # Warnings have a yellow background.
         "Warning" {
             $LogLevel = "[WRN]"
             $TextColour.Foregound = "Black"
             $TextColour.Background = "Yellow"
             break
         }
+        # Verbose messages are cyan.
         "Verbose" {
             $LogLevel = "[VRB]"
             $TextColour.Foregound = "Cyan"
@@ -230,16 +314,25 @@ Function Write-Log {
         }
     }
 
+    # Combine timestamp, log level, and comment into the log output string.
     $LogOutput = $TimeStamp + " -- " + $LogLevel + " -- " + $Comment
 
+    # Write to the log file if enabled.
     if ($WriteLogFile) {
         Add-Content -Value $LogOutput -LiteralPath $LogFileName
     }
 
+    # Write to the console if enabled.
     if ($Console) {
         Write-Host $LogOutput -ForegroundColor $TextColour.Foregound -BackgroundColor $TextColour.Background
     }
 
+    # Append to the GUI text box if UseGUI is enabled and the GUITextBox variable is initialized.
+    if ($UseGUI -and ($null -ne $Script:GUITextBox)) {
+        $Script:GUITextBox.AppendText("$LogOutput`n")
+    }
+
+    # Handle log output based on the severity level and error action preference.
     Switch ($Level) {
         "Debug" {
             Write-Debug $LogOutput -ErrorAction $ErrorAct
@@ -277,26 +370,38 @@ try {
 
 # Validate schedule parameters
 if ($Schedule -eq "Custom" -and -not $Interval) {
-    throw "Interval must be specified for custom schedules."
+    Write-Log @LoggingSettings -Comment "Interval must be specified for custom schedules." -Level ERROR
+    exit
 }
 if ($Schedule -eq "Weekly" -and (-not $Days -or $Days.Count -eq 0)) {
-    throw "At least one day must be specified for Weekly schedules."
+    Write-Log @LoggingSettings -Comment "At least one day must be specified for Weekly schedules." -Level ERROR
+    exit
 }
 if ($Schedule -eq "Monthly" -and (-not $Days -or $Days.Count -eq 0 -or -not $Weeks -or $Weeks.Count -eq 0)) {
-    throw "Both days and weeks must be specified for Monthly schedules."
+    Write-Log @LoggingSettings -Comment "Both days and weeks must be specified for Monthly schedules." -Level ERROR
+    exit
+}
+if ($Schedule -and !$Times) {
+    Write-Log @LoggingSettings -Comment "At least one time must be provided when using a schedule." -Level ERROR
+    exit
+}
+if ($Schedule -eq "Weekly" -and (!$Days -or $Days.Count -eq 0)) {
+    Write-Log @LoggingSettings -Comment "At least one day must be specified for Weekly schedules." -Level ERROR
+    exit
+}
+if ($Schedule -eq "Monthly" -and (!$Weeks -or $Weeks.Count -eq 0)) {
+    Write-Log @LoggingSettings -Comment "At least one week must be specified for Monthly schedules." -Level ERROR
+    exit
 }
 
 # Validate Source and Destination paths
 if (-not (Test-Path -Path $Source)) {
-    throw "Source path does not exist: $Source"
+    Write-Log @LoggingSettings -Comment "Source path does not exist: $Source" -Level ERROR
+    exit
 }
 if (-not (Test-Path -Path $Destination)) {
-    throw "Destination path does not exist: $Destination"
-}
-
-# Ensure the log directory exists
-if (-not (Test-Path -Path $LogPath)) {
-    New-Item -ItemType Directory -Path $LogPath -Force | Out-Null  # Create the log directory if it does not exist.
+    Write-Log @LoggingSettings -Comment "Destination path does not exist: $Destination" -Level ERROR
+    exit
 }
 
 $RobocopySuccess = $False
@@ -320,32 +425,21 @@ $RobocopySuccess = $False
 # *******************************************************
 
 # Write script execution details to the script log
-Add-Content -Path $ScriptLogFile -Value "Starting backup operation on $(Get-Date)"
-Add-Content -Path $ScriptLogFile -Value "Source: $Source"
-Add-Content -Path $ScriptLogFile -Value "Destination: $Destination"
-Add-Content -Path $ScriptLogFile -Value "Log Path: $LogPath"
-
-# Validate schedule parameters
-if ($Schedule -and !$Times) {
-    throw "At least one time must be provided when using a schedule."
-}
-if ($Schedule -eq "Weekly" -and (!$Days -or $Days.Count -eq 0)) {
-    throw "At least one day must be specified for Weekly schedules."
-}
-if ($Schedule -eq "Monthly" -and (!$Weeks -or $Weeks.Count -eq 0)) {
-    throw "At least one week must be specified for Monthly schedules."
-}
+Write-Log @LoggingSettings -Comment "Starting backup operation on $(Get-Date)" -Level Info
+Write-Log @LoggingSettings -Comment "Source: $Source" -Level Info
+Write-Log @LoggingSettings -Comment "Destination: $Destination" -Level Info
+Write-Log @LoggingSettings -Comment "Log Path: $LogPath" -Level Info
 
 # Clean up old logs based on retention period (Default older than 7 days)
 $OldLogs = Get-ChildItem -Path $LogPath -Filter *.txt | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$LogRetentionDays) }  # Identify old log files.
 if ($OldLogs) {
     $OldLogs | Remove-Item -Force  # Remove old log files.
-    Add-Content -Path $ScriptLogFile -Value "Logs older than $LogRetentionDays days have been removed."  # Log the cleanup action.
+    Write-Log @LoggingSettings -Comment "Logs older than $LogRetentionDays days have been removed." -Level Info
 }
 
 # Add Task Scheduler job if -Schedule is specified
 if ($Schedule) {
-    Write-Output "Scheduling the script in Task Scheduler..."
+    Write-Log @LoggingSettings -Comment "Scheduling the script in Task Scheduler..." -Level Info
 
     foreach ($time in $Times) {
         # Define the action for the Task Scheduler to run this script
@@ -353,77 +447,86 @@ if ($Schedule) {
 
         switch ($Schedule) {
             "Daily" {
-                $TaskTrigger = New-ScheduledTaskTrigger -Daily -At $time  # Create daily trigger for specified time.
+                # Create daily trigger for specified time.
+                $TaskTrigger = New-ScheduledTaskTrigger -Daily -At $time
             }
             "Weekly" {
                 foreach ($day in $Days) {
-                    $TaskTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $day -At $time  # Weekly trigger for specified days and time.
+                    # Weekly trigger for specified days and time.
+                    $TaskTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $day -At $time
                 }
             }
             "Monthly" {
                 foreach ($week in $Weeks) {
-                    $TaskTrigger = New-ScheduledTaskTrigger -Monthly -WeeksOfMonth $week -DaysOfWeek $Days -At $time  # Monthly trigger for specific weeks, days, and time.
+                    # Monthly trigger for specific weeks, days, and time.
+                    $TaskTrigger = New-ScheduledTaskTrigger -Monthly -WeeksOfMonth $week -DaysOfWeek $Days -At $time
                 }
             }
             "Custom" {
                 if (-not $Interval) {
-                    throw "Interval must be specified for custom schedules."  # Ensure Interval is provided for custom schedules.
+                    # Ensure Interval is provided for custom schedules.
+                    Write-Log @LoggingSettings -Comment "Interval must be specified for custom schedules." -Level Error
+                    exit
                 }
-                $TaskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) -RepetitionInterval (New-TimeSpan -Hours $Interval) -RepetitionDuration ([timespan]::MaxValue)  # Custom interval-based trigger.
+                # Custom interval-based trigger.
+                $TaskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) -RepetitionInterval (New-TimeSpan -Hours $Interval) -RepetitionDuration ([timespan]::MaxValue)
             }
         }
 
         # Define task settings
         $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-        $TaskName = "RobocopyBackupTask_$($TaskHash)_$($time)"  # Unique task name based on time.
+        # Unique task name based on time.
+        $TaskName = "RobocopyBackupTask_$($TaskHash)_$($time)"
 
         # Register the task in Task Scheduler
         Register-ScheduledTask -Action $TaskAction -Trigger $TaskTrigger -Settings $TaskSettings -TaskName $TaskName -Description "Scheduled Robocopy backup task at $time"
 
-        Write-Output "Task Scheduler job created successfully with the name '$TaskName'."
+        Write-Log @LoggingSettings -Comment "Task Scheduler job created successfully with the name '$TaskName'." -Level Info
     }
 }
 
 # Execute the Robocopy command
 if ($DryRun) {
-    Write-Output "Dry run enabled. No changes will be made."
-    $RobocopyParams.DryRun = "/L"  # Add dry run parameter
+    Write-Log @LoggingSettings -Comment "Dry run enabled. No changes will be made." -Level Info
+    # Add dry run parameter
+    $RobocopyParams.DryRun = "/L"
 }
 
+# Set the multithreading parameter
 if ($MTThreads) {
-	$RobocopyParams.MultiThread = "/MT:$MTThreads"  # Set the multithreading parameter
+	$RobocopyParams.MultiThread = "/MT:$MTThreads"
 }
 
 try {
-	Write-Output "Executing Robocopy..."
+    Write-Log @LoggingSettings -Comment "Executing Robocopy..." -Level Info
 	robocopy @RobocopyParams
 	
 	$RobocopySuccess = $True
 } catch {
-	Add-Content -Path $ScriptLogFile -Value "Robocopy encountered an error on $(Get-Date): $_"
-	throw $_  # Re-throw the error after logging
+    Write-Log @LoggingSettings -Comment "Robocopy encountered an error on $(Get-Date): $_" -Level Error
+    exit
 }
 
 try {
 	# Parse the Robocopy log to extract summary details
 	$Summary = Get-Content $RobocopyLogFile | Select-String -Pattern "^Total\|Copied\|Skipped\|Failed" -Context 0,0
-	Add-Content -Path $ScriptLogFile -Value "Robocopy completed successfully on $(Get-Date)."  
-	Add-Content -Path $ScriptLogFile -Value "Summary:"  
-	$Summary | ForEach-Object { Add-Content -Path $ScriptLogFile -Value $_ }
+    Write-Log @LoggingSettings -Comment "Robocopy completed successfully on $(Get-Date)." -Level Info
+    Write-Log @LoggingSettings -Comment "Summary:" -Level Info
+	$Summary | ForEach-Object { Write-Log @LoggingSettings -Comment $_ -Level Info }
 } catch {
-	Add-Content -Path $ScriptLogFile -Value "An unknown error occured when parsing the log for summary details: $_"
-	throw $_  # Re-throw the error after logging
+    Write-Log @LoggingSettings -Comment "An unknown error occured when parsing the log for summary details: $_" -Level Error
+    exit
 }
 
 # Log completion status to the script log
 if ($RobocopySuccess) {
-    Add-Content -Path $ScriptLogFile -Value "Robocopy completed successfully on $(Get-Date)."
-    Add-Content -Path $ScriptLogFile -Value "Robocopy log file: $RobocopyLogFile"
+    Write-Log @LoggingSettings -Comment "Robocopy completed successfully on $(Get-Date)." -Level Info
+    Write-Log @LoggingSettings -Comment "Robocopy log file: $RobocopyLogFile" -Level Info
 } else {
-    Add-Content -Path $ScriptLogFile -Value "Robocopy encountered an error on $(Get-Date)."
-    Add-Content -Path $ScriptLogFile -Value "Check the Robocopy log file for details: $RobocopyLogFile"
+    Write-Log @LoggingSettings -Comment "Robocopy encountered an error on $(Get-Date)." -Level Error
+    Write-Log @LoggingSettings -Comment "Check the Robocopy log file for details: $RobocopyLogFile" -Level Error
 }
 
-Write-Output "Backup completed. Check the logs for details:"
-Write-Output "Robocopy log: $RobocopyLogFile"
-Write-Output "Script log: $ScriptLogFile"  # Inform the user where logs can be found.
+Write-Log @LoggingSettings -Comment "Backup completed. Check the logs for details:" -Level Info
+Write-Log @LoggingSettings -Comment "Robocopy log: $RobocopyLogFile" -Level Info
+Write-Log @LoggingSettings -Comment "Script log: $ScriptLogFile" -Level Info
