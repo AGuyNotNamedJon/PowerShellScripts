@@ -59,3 +59,116 @@ function Read-InYesNo {
         }
     }
 }
+
+function Get-WanIp {
+	<#
+	.SYNOPSIS
+		Gets the external (WAN) IP address of the current computer
+	.DESCRIPTION
+		Uses ipify API to retrieve the current external IPv4 and/or IPv6 address
+	.PARAMETER IpVersion
+		Specifies which IP version to retrieve: 'IPv4', 'IPv6', or 'Both'. Defaults to 'IPv4'
+	.OUTPUTS
+		System.String or PSCustomObject. Returns the WAN IP address(es)
+	.EXAMPLE
+		PS> Get-WanIp
+		Returns the current external IPv4 address
+	.EXAMPLE
+		PS> Get-WanIp -IpVersion IPv6
+		Returns the current external IPv6 address
+	.EXAMPLE
+		PS> Get-WanIp -IpVersion Both
+		Returns both IPv4 and IPv6 addresses as a custom object
+	.NOTES
+		Version: 1.0
+		Author: Saul Rodgers
+		Creation: 24/01/2025
+	#>
+	[CmdletBinding()]
+	param(
+		[ValidateSet('IPv4', 'IPv6', 'Both')]
+		[string]$IpVersion = 'IPv4'
+	)
+	
+	try {
+		switch ($IpVersion) {
+			'IPv4' {
+				$response = Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -Method Get
+				return $response.ip
+			}
+			'IPv6' {
+				$response = Invoke-RestMethod -Uri 'https://api6.ipify.org?format=json' -Method Get
+				return $response.ip
+			}
+			'Both' {
+				$ipv4 = Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -Method Get
+				$ipv6 = Invoke-RestMethod -Uri 'https://api6.ipify.org?format=json' -Method Get
+				return [PSCustomObject]@{
+					IPv4 = $ipv4.ip
+					IPv6 = $ipv6.ip
+				}
+			}
+		}
+	}
+	catch {
+		Write-Error "Failed to retrieve WAN IP: $_"
+		return $null
+	}
+}
+
+function Get-IpGeoLocation {
+	<#
+	.SYNOPSIS
+		Gets detailed geolocation information for an IP address
+	.DESCRIPTION
+		Uses ip-api.com to retrieve detailed information about an IP address including
+		hostname, city, region, country, location, and organization
+	.PARAMETER IpAddress
+		The IP address to look up. If not specified, uses the current external IP
+	.OUTPUTS
+		PSCustomObject containing the geolocation information
+	.EXAMPLE
+		PS> Get-IpGeoLocation
+		Returns geolocation information for the current external IP
+	.EXAMPLE
+		PS> Get-IpGeoLocation -IpAddress "9.9.9.9"
+		Returns geolocation information for the specified IP address
+	.NOTES
+		Version: 1.0
+		Author: Saul Rodgers
+		Creation: 24/01/2025
+		Uses free ip-api.com service - limited to 45 requests per minute
+	#>
+	[CmdletBinding()]
+	param(
+		[string]$IpAddress
+	)
+	
+	try {
+		# If no IP provided, get current external IP
+		if (-not $IpAddress) {
+			$IpAddress = Get-WanIp
+		}
+
+		# Query ip-api.com for geolocation data
+		$uri = "http://ip-api.com/json/$IpAddress"
+		$response = Invoke-RestMethod -Uri $uri -Method Get
+
+		# Return formatted results
+		return [PSCustomObject]@{
+			IPAddress    = $IpAddress
+			Hostname    = $response.reverse
+			City       = $response.city
+			Region     = $response.regionName
+			Country    = $response.country
+			Location   = "$($response.lat), $($response.lon)"
+			ISP        = $response.isp
+			ASN        = $response.as
+			Organization = $response.org
+		}
+	}
+	catch {
+		Write-Error "Failed to retrieve geolocation data: $_"
+		return $null
+	}
+}
