@@ -191,14 +191,14 @@ function Get-IpGeoLocation {
 			HelpMessage = "Maximum number of retry attempts for rate-limited requests",
 			Mandatory = $false
 		)]
-		[ValidateRange(1,10)]
+		[ValidateRange(1, 10)]
 		[int]$MaxRetries = 3,
 
 		[Parameter(
 			HelpMessage = "Maximum wait time in seconds between retries",
 			Mandatory = $false
 		)]
-		[ValidateRange(60,600)]
+		[ValidateRange(60, 600)]
 		[int]$MaxRetryWaitSeconds = 300
 	)
 
@@ -255,11 +255,11 @@ function Get-IpGeoLocation {
 				# Log error and return simplified error object
 				Write-Error "API endpoint returned a failure status: $($data.message) : $detailedMessage"
 				return [PSCustomObject]@{
-					IPAddress         = $IpAddress             # Original queried IP
-					Query             = $data.query                    # Queried IP address according to API. Usful in determining if IP was resolved correctly
-					Status            = $data.status           # API failure status
-					Message           = $data.message          # Original API error message
-					DetailedMessage   = $detailedMessage       # Human-friendly error explanation
+					IPAddress       = $IpAddress             # Original queried IP
+					Query           = $data.query            # Queried IP address according to API. Usful in determining if IP was resolved correctly
+					Status          = $data.status           # API failure status
+					Message         = $data.message          # Original API error message
+					DetailedMessage = $detailedMessage       # Human-friendly error explanation
 				}
 			}
 
@@ -321,4 +321,52 @@ function Get-IpGeoLocation {
 			return $null
 		}
 	} while ($retryCount -le $MaxRetries)
+}
+
+function Get-DnsServerList {
+	<#
+	.SYNOPSIS
+		Gets configured DNS servers from all network adapters
+	.DESCRIPTION
+		Retrieves a unique list of DNS server addresses from all network adapters on the system.
+		Can filter results to show only IPv4, IPv6, or both address types.
+	.PARAMETER IpVersion
+		Specifies which IP version to retrieve: 'IPv4', 'IPv6', or 'Both'. Defaults to 'Both'
+	.OUTPUTS
+		[System.String[]] Array of unique DNS server IP addresses
+	.EXAMPLE
+		PS> Get-DnsServerList
+		Returns all unique DNS server addresses (both IPv4 and IPv6)
+	.EXAMPLE
+		PS> Get-DnsServerList -IpVersion IPv4 
+		Returns only IPv4 DNS server addresses
+	.NOTES
+		Version: 1.0
+		Author: Saul Rodgers
+		Creation: 24/01/2025
+	#>
+
+	[CmdletBinding()]
+	param(
+		[ValidateSet('IPv4', 'IPv6', 'Both')]
+		[string]$IpVersion = 'Both'
+	)
+
+	try {
+		$dnsServers = Get-DnsClientServerAddress | Where-Object {
+			switch ($IpVersion) {
+				'IPv4' { $_.AddressFamily -eq 'IPv4' }
+				'IPv6' { $_.AddressFamily -eq 'IPv6' }
+				'Both' { $_.AddressFamily -in @('IPv4', 'IPv6') }
+			}
+		} | Where-Object ServerAddresses | 
+		Select-Object -ExpandProperty ServerAddresses |
+		Sort-Object -Unique
+
+		return $dnsServers
+	}
+	catch {
+		Write-Error "Failed to retrieve DNS servers: $_"
+		return $null
+	}
 }
